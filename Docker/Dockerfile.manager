@@ -1,0 +1,6 @@
+# Dockerfile.manager
+FROM python:3.9-slim
+WORKDIR /app
+COPY manager.py /app/manager.py
+RUN pip install flask kubernetes requests
+CMD ["python", "manager.py"]

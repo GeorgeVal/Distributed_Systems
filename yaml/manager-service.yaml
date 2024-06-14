@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: manager-service
+spec:
+  selector:
+    app: manager
+  ports:
+    - protocol: TCP
+      port: 5002
+      targetPort: 5002

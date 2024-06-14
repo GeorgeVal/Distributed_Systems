@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: manager
+spec:
+  serviceName: "manager"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: manager
+  template:
+    metadata:
+      labels:
+        app: manager
+    spec:
+      containers:
+      - name: manager
+        image: georgeval/manager-service:latest
+        ports:
+        - containerPort: 5002
