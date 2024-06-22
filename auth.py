@@ -1,17 +1,29 @@
-# auth.py
+#auth.py
 import sys
 import subprocess
 from kubernetes import client, config
 from flask import Flask, request, jsonify
+from pymongo import MongoClient
 import hashlib
 import uuid
 
 app = Flask(__name__)
 
-users = {
-    "admin": {"password": hashlib.sha256("pass".encode()).hexdigest(), "role": "admin"}
-}
-tokens = {}
+# Initialize MongoDB client
+client = MongoClient('mongodb://mongodb-service:27777/')
+db = client['auth_db']
+users_collection = db['users']
+tokens_collection = db['tokens']
+
+# Insert admin user if not exists
+if users_collection.count_documents({'username': 'admin'}) == 0:
+    users_collection.insert_one({
+        'username': 'admin',
+        'password': hashlib.sha256("pass".encode()).hexdigest(),
+        'role': 'admin'
+    })
+
+
 
 def generate_token(username):
     return hashlib.sha256(f"{username}{uuid.uuid4()}".encode()).hexdigest()
@@ -19,20 +31,29 @@ def generate_token(username):
 @app.route('/register', methods=['POST'])
 def register():
     token = request.headers.get('Authorization')
-    if token not in tokens :
-        return jsonify({"error": "Token Not Found", "debug": tokens, "debug": users[tokens[token]]['role']}), 403
+    token_entry = tokens_collection.find_one({'token': token})
+    user_entry = users_collection.find_one({'username': token_entry['username']})
     
-    if tokens[token] != "admin":
-        return jsonify({"error": "Unauthorized", "debug": tokens, "debug": users[tokens[token]]['role']}), 403
+    if not token_entry:
+        return jsonify({"error": "Token Not Found"}), 403
+    
+    if user_entry['role'] != "admin":
+        return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
     username = data['username']
     password = data['password']
     role = data['role']
     
-    if username in users:
+    if users_collection.find_one({'username': username}):
         return jsonify({"error": "User already exists"}), 400
-    users[username] = {"password": hashlib.sha256(password.encode()).hexdigest(), "role": role}
+    
+    users_collection.insert_one({
+        'username': username,
+        'password': hashlib.sha256(password.encode()).hexdigest(),
+        'role': role
+    })
+    
     return jsonify({"message": "User registered successfully"}), 201
 
 @app.route('/login', methods=['POST'])
@@ -40,24 +61,30 @@ def login():
     data = request.json
     username = data['username']
     password = data['password']
-    if username not in users or users[username]['password'] != hashlib.sha256(password.encode()).hexdigest():
+    user_entry = users_collection.find_one({'username': username})
+    
+    if not user_entry or user_entry['password'] != hashlib.sha256(password.encode()).hexdigest():
         return jsonify({"error": "Invalid credentials"}), 401
     token = generate_token(username)
-    tokens[token] = username
-    return jsonify({"token": token, "debug": tokens}), 200
+
+    tokens_collection.insert_one({'token': token, 'username': username})
+    
+    return jsonify({"token": token}), 200
 
 @app.route('/delete_user', methods=['DELETE'])
 def delete_user():
     token = request.headers.get('Authorization')
-    if token not in tokens or users[tokens[token]]['role'] != 'admin':
+    token_entry = tokens_collection.find_one({'token': token})
+    if not token_entry or users_collection.find_one({'username': token_entry['username']})['role'] != 'admin':
         return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
     username = data['username']
     
-    if username not in users:
+    if not users_collection.find_one({'username': username}):        
         return jsonify({"error": "User does not exist"}), 400
-    del users[username]
+    users_collection.delete_one({'username': username})
+
     return jsonify({"message": "User deleted successfully"}), 200
 
 
