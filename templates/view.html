@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>View Jobs</title>
+</head>
+<body>
+  <h1>View Jobs</h1>
+  <form action="/jobs/view" method="get">
+    <label for="token">User Token:</label>
+    <input type="text" id="token" name="token" required><br>
+    <input type="submit" value="View Jobs">
+  </form>
+  <a href="/">Back to Home</a>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+</body>
+</html>

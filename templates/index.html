@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Job Management System</title>
+</head>
+<body>
+  <h1>Job Management System</h1>
+  <ul>
+    <li><a href="/admin/register">Register User</a></li>
+    <li><a href="/admin/login">Login User</a></li>
+    <li><a href="/admin/delete_user">Delete User</a></li>
+    <li><a href="/jobs/submit">Submit Job</a></li>
+    <li><a href="/jobs/view">View Jobs</a></li>
+  </ul>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+</body>
+</html>

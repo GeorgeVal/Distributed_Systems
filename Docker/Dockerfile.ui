@@ -2,5 +2,6 @@
 FROM python:3.9-slim
 WORKDIR /app
 COPY ui.py /app/ui.py
-RUN pip install requests
+COPY templates /app/templates
+RUN pip install requests flask
 CMD ["python", "ui.py"]

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Submit Job</title>
+</head>
+<body>
+  <h1>Submit Job</h1>
+  <form action="/jobs/submit" method="post" enctype="multipart/form-data">
+    <label for="token">User Token:</label>
+    <input type="text" id="token" name="token" required><br>
+    <label for="mapper">Mapper Script Path:</label>
+    <input type="text" id="mapper" name="mapper" required><br>
+    <label for="reducer">Reducer Script Path:</label>
+    <input type="text" id="reducer" name="reducer" required><br>
+    <label for="input_file">Input File:</label>
+    <input type="file" id="input_file" name="input_file" required><br>
+    <input type="submit" value="Submit Job">
+  </form>
+  <a href="/">Back to Home</a>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+</body>
+</html>
