@@ -16,4 +16,4 @@ spec:
       - name: worker
         image: georgeval/worker-service:latest
         ports:
-        - containerPort: 5003
+        - containerPort: 5004
