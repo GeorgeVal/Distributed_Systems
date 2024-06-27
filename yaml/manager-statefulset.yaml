@@ -16,5 +16,34 @@ spec:
       containers:
       - name: manager
         image: georgeval/manager-service:latest
+        volumeMounts:
+        - name: data-storage
+          mountPath: /data/pv0001/
         ports:
         - containerPort: 5002
+      volumes:
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: data-minio-0
+  volumeClaimTemplates:
+  - metadata:
+      name: data-minio-0
+    spec:
+      accessModes: ["ReadWriteMany"]
+      resources:
+        requests:
+          storage: 2Gi
+  - metadata:
+      name: data-minio-1
+    spec:
+      accessModes: ["ReadWriteMany"]
+      resources:
+        requests:
+          storage: 2Gi
+  - metadata:
+      name: data-minio-2
+    spec:
+      accessModes: ["ReadWriteMany"]
+      resources:
+        requests:
+          storage: 2Gi
