@@ -30,15 +30,6 @@ def generate_token(username):
 
 @app.route('/register', methods=['POST'])
 def register():
-    token = request.headers.get('Authorization')
-    token_entry = tokens_collection.find_one({'token': token})
-    user_entry = users_collection.find_one({'username': token_entry['username']})
-    
-    if not token_entry:
-        return jsonify({"error": "Token Not Found"}), 403
-    
-    if user_entry['role'] != "admin":
-        return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
     username = data['username']
@@ -60,11 +51,7 @@ def register():
 def login():
     data = request.json
     username = data['username']
-    password = data['password']
-    user_entry = users_collection.find_one({'username': username})
     
-    if not user_entry or user_entry['password'] != hashlib.sha256(password.encode()).hexdigest():
-        return jsonify({"error": "Invalid credentials"}), 401
     token = generate_token(username)
 
     tokens_collection.insert_one({'token': token, 'username': username})
@@ -73,11 +60,7 @@ def login():
 
 @app.route('/delete_user', methods=['DELETE'])
 def delete_user():
-    token = request.headers.get('Authorization')
-    token_entry = tokens_collection.find_one({'token': token})
-    if not token_entry or users_collection.find_one({'username': token_entry['username']})['role'] != 'admin':
-        return jsonify({"error": "Unauthorized"}), 403
-
+   
     data = request.json
     username = data['username']
     
@@ -86,82 +69,3 @@ def delete_user():
     users_collection.delete_one({'username': username})
 
     return jsonify({"message": "User deleted successfully"}), 200
-
-
-jobs = {}
-job_id_counter = 1
-
-
-@app.route('/submit_job', methods=['POST'])
-def submit_job():
-    token = request.headers.get('Authorization')
-    if token not in tokens:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    mapper = request.form['mapper']
-    reducer = request.form['reducer']
-    input_file = request.files['input_file']
-
-    global job_id_counter
-    job_id = job_id_counter
-    job_id_counter += 1
-
-    input_file_path = f"/mnt/data/job_{job_id}_input.txt"
-    with open(input_file_path, 'wb') as f:
-        f.write(input_file.read())
-
-    # Split input file for mapper tasks
-    with open(input_file_path, 'r') as f:
-        lines = f.readlines()
-
-    chunk_size = len(lines) // 3
-    chunks = [lines[i:i + chunk_size] for i in range(0, len(lines), chunk_size)]
-
-    for i, chunk in enumerate(chunks):
-        job_name = f"map-task-{job_id}-{i}"
-        create_k8s_job(job_name, mapper, "map", chunk)
-
-    # Register the job
-    jobs[job_id] = {
-        "status": "submitted",
-        "mapper": mapper,
-        "reducer": reducer,
-        "input_file": input_file_path
-    }
-
-    return jsonify({"message": "Job submitted successfully", "job_id": job_id}), 200
-
-@app.route('/jobs', methods=['GET'])
-def get_jobs():
-    token = request.headers.get('Authorization')
-    if token not in tokens:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    return jsonify(jobs), 200
-
-def create_k8s_job(job_name, function, task_type, input_data):
-    batch_v1 = client.BatchV1Api()
-    job_manifest = {
-        'apiVersion': 'batch/v1',
-        'kind': 'Job',
-        'metadata': {
-            'name': job_name
-        },
-        'spec': {
-            'template': {
-                'spec': {
-                    'containers': [{
-                        'name': job_name,
-                        'image': 'worker:latest',
-                        'command': ['python', 'worker.py', task_type],
-                        'stdin': ''.join(input_data)
-                    }],
-                    'restartPolicy': 'Never'
-                }
-            }
-        }
-    }
-    batch_v1.create_namespaced_job(body=job_manifest, namespace='default')
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)

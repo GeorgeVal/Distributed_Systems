@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ui-account
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: ui-account # Name of the ServiceAccount
+  namespace: default
+roleRef:
+  kind: Role # This must be Role or ClusterRole
+  name: ui-account # This must match the name of the Role or ClusterRole you wish to bind to
+  apiGroup: rbac.authorization.k8s.io

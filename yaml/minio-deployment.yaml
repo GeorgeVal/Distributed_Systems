@@ -1,0 +1,19 @@
+replicas: 3
+
+statefulset:
+  enabled: true
+  replicas: 3
+
+persistence:
+  enabled: true
+  size: 500M
+  accessModes:
+    - ReadWriteMany
+
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 2
+
+accessKey: myaccesskey
+secretKey: mysecretkey

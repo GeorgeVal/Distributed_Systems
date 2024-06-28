@@ -6,15 +6,23 @@
 </head>
 <body>
   <h1>Submit Job</h1>
-  <form action="/jobs/submit" method="post" enctype="multipart/form-data">
+  <form action="/jobs/submit" method="post">
     <label for="token">User Token:</label>
     <input type="text" id="token" name="token" required><br>
-    <label for="mapper">Mapper Script Path:</label>
+    <label for="mapper">Number of Mappers:</label>
     <input type="text" id="mapper" name="mapper" required><br>
-    <label for="reducer">Reducer Script Path:</label>
+    <label for="reducer">Number of Reducers:</label>
     <input type="text" id="reducer" name="reducer" required><br>
-    <label for="input_file">Input File:</label>
-    <input type="file" id="input_file" name="input_file" required><br>
+    <label for="map_script">Map Script:</label>
+    <input type="text" id="map_script" name="map_script" required><br>
+    <label for="reduce_script">Reduce Script:</label>
+    <input type="text" id="reduce-script" name="reduce_script" required><br>
+    <label for="file_path">File Path:</label>
+    <input type="text" id="file_path" name="file_path" required><br>
+    <select id="job_type" name="job_type">
+      <option value="map">Map</option>
+      <option value="reduce">Reduce</option>
+    </select><br>
     <input type="submit" value="Submit Job">
   </form>
   <a href="/">Back to Home</a>

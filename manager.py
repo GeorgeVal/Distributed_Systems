@@ -3,13 +3,15 @@
 
 import ssl
 import sys
+import time
 from flask import Flask, request, jsonify
 from kubernetes.client.api import core_v1_api
 from kubernetes import client, config
 from pymongo import MongoClient
 from minio import Minio
+import os
 import requests
-
+from time import sleep
 
 #config.load_kube_config()
 config.load_incluster_config()
@@ -19,28 +21,26 @@ app = Flask(__name__)
 #client = MongoClient('mongodb://mongodb-service.default.svc.cluster.local:27777/', serverSelectionTimeoutMS=5000)
 clientMongo = MongoClient('mongodb://mongodb-service:27777/')
 
+
 clientMinio = Minio(
-        "10.244.1.185:9000",
+        "minio:9000",
         access_key="minio",
         secret_key="minio123",
         secure=False
     )
 
-def uploadFile(source_file):
-    # The destination bucket and filename on the MinIO server
-    bucket_name = "python-test-bucket"
-    destination_file = "my-test-file.txt"
+global allMappers
+global allReducers
+allMappers = -5
+allReducers = -5
 
-    
+def uploadFile(source_file, bucket_name, destination_file):
 
 
     # Make the bucket if it doesn't exist.
     found = clientMinio.bucket_exists(bucket_name)
     if not found:
          clientMinio.make_bucket(bucket_name)
-         print("Created bucket", bucket_name)
-    else:
-         print("Bucket", bucket_name, "already exists")
 
     # Upload the file, renaming it in the process
     clientMinio.fput_object(
@@ -63,27 +63,43 @@ tokens_collection = db_auth['tokens']
 
 global job_id_counter 
 job_id_counter = 1
+job_id = 1
+
+def split_file(jobId, bucket_name, object_name, file_name, n):
+    # Read the input file
+    clientMinio.fget_object("input-bucket", "input.txt", "input.txt")
+
+    with open("input.txt", 'r') as f:
+        lines = f.readlines()
+
+    # Total number of lines
+    total_lines = len(lines)
+    
+    # Number of lines per file
+    lines_per_file = total_lines // n
+    remainder = total_lines % n
+
+    # Create the output files and write the lines to each file
+    start = 0
+    for i in range(n):
+        end = start + lines_per_file + (1 if i < remainder else 0)  # Add an extra line to the first few files if there is a remainder
+        with open(f'input-{i}.txt', 'w') as f:
+            for j in range(start, end):
+                f.write(lines[j])
+        start = end
+        formatted_number = f"{i:02}"
+        fullString = "worker-pod"+str(jobId)+formatted_number+".txt"
+        bucket_name = "input-bucket" 
+        uploadFile(f'input-{i}.txt', bucket_name, fullString)
 
 
 
-
-
-job_data = {
-        "job_id": "2",
-        "status": "submitted",
-        "job_type": "wordcount",
-        "map_script": "def map_function(line): return line.split()",
-        "reduce_script": "def reduce_function(key, values): return sum(values)",
-        "input_file": "/mnt/data/job_{}_input.txt".format(job_id_counter)
-    }
-job_id_counter += 1
-
-print("Inserting new job in db...")
-jobs_collection.insert_one(job_data)
 
 
 @app.route('/submit_job', methods=['POST'])
 def submit_job():
+    global allMappers 
+    global allReducers
     token = request.headers.get('Authorization')
     #if token not in tokens_collection:
     #    return jsonify({"error": "Unauthorized"}), 403
@@ -91,22 +107,30 @@ def submit_job():
     job_type = data['job_type']
     map_script = data['map_script']
     reduce_script = data['reduce_script']
-    input_file = data['input_file']
     mappers = data["mappers"]
     reducers = data["reducers"]
-    print(f'input_file: {input_file}')
     global job_id_counter
     #job_id = job_id_counter
     job_id = 1
     job_id_counter += 1
     input_file_path = f"/data/pv0001/job_{job_id}_input.txt"
+
+    allMappers = int(mappers)
+    allReducers = int(reducers)
+
+    # os.makedirs(os.path.dirname(input_file_path), exist_ok=True)
+
+    #source_file = input_file_path
+    #bucket_name = "input-bucket"
+    #destination = f"job_{job_id}_input_tmp.txt"
+    #uploadFile(source_file, bucket_name, destination)
     #with open(input_file_path, 'wb') as f:
     #    f.write(input_file.encode())
 
-    with open(input_file_path, 'w') as file:
-        file.write(input_file)
 
-    uploadFile(input_file_path)
+    split_file(job_id, "input-bucket", "input.txt", "input.txt", int(mappers))
+
+    #uploadFile(input_file_path)
 
     # Register the job in MongoDB
     job_data = {
@@ -119,125 +143,169 @@ def submit_job():
     }
     jobs_collection.insert_one(job_data)
 
+    pod_ip={}
     # Assign job to a mapper
-    for i in range(len(mappers)):
-        assign_job_to_worker(job_id, job_type, map_script, reduce_script, input_file_path)
+    for i in range(int(mappers)):
+        pod_ip[i]=assign_job_to_worker(job_id, "map", i)
+        
 
-    # Assign job to a reducer
-    for i in range(len(mappers)):
-        assign_job_to_worker(job_id, job_type, map_script, reduce_script, input_file_path)
     
-    return jsonify({"message": "Job submitted successfully", "job_id": job_id}), 200
+    return jsonify({"message": f"Job submited.","pod_ip":pod_ip}), 200
 
-@app.route('/create-pod', methods=['POST'])
-def open_pod():
+def assign_job_to_worker(job_id, flag, idHelper):
+    formatted_number = f"{idHelper:02}"
+    fullString = "worker-pod"+str(job_id)+formatted_number
+    pod_ip=create_pod(fullString, flag)
+    return pod_ip
+    #return jsonify({"message": "Full string is ", "fullString": job_id}), 200
+
+
+
+@app.route('/create-job', methods=['POST'])
+def create_pod(pod_name,flag):
     '''
     This method launches a pod in kubernetes cluster according to command
     '''
-
+    
+    global allMappers 
+    global allReducers
+    core_v1 = core_v1_api.CoreV1Api()
+    namespace = "default"
     
 
-    core_v1 = core_v1_api.CoreV1Api()
-    pod_name = "worker_pod"
-    namespace = "default"
-    api_response = None
-    try:
-        api_response = core_v1.read_namespaced_pod(name=pod_name,
-                                                        namespace=namespace)
-    except Exception as e:
-        if e.status != 404:
-            print("Unknown error: %s" % e)
-            exit(1)
-
-    if not api_response:
-        # Create pod manifest
-        pod_manifest = {
-            'apiVersion': 'v1',
-            'kind': 'Pod',
-            'metadata':{
-                'name': pod_name,
-                'labels':{
-                    'app': 'worker'
-                    },
-            },
-            'spec':{
-                'containers'[{
-                    'name': 'worker',
-                    'image': 'fmavrikaki/worker-service:latest',
-                    'ports':{
-                        'containerPort': '5004',
-                    }
-            }]
+    # Create pod manifest
+    pod_manifest = {
+        'apiVersion': 'v1',
+        'kind': 'Pod',
+        'metadata': {
+            'name': pod_name,
+            'labels': {
+                'app': 'worker'
             }
+        },
+        'spec': {
+            'containers': [{
+                'name': 'worker',
+                'image': 'georgeval/worker-service:latest',
+                'ports': [{
+                    'containerPort': 5004
+                }]
+            }]
         }
-        
-        
-        api_response = core_v1.create_namespaced_pod(body=pod_manifest,                                                          namespace=namespace)
+    }
 
-        while True:
-            api_response = core_v1.read_namespaced_pod(name=pod_name,
-                                                            namespace=namespace)
-            if api_response.status.phase != 'Pending':
-                break
-        
-        print(f'Pod {pod_name} in {namespace} created.')
+    # Create the pod
+    api_response = core_v1.create_namespaced_pod(body=pod_manifest,
+        namespace='default')
+    
+    
+        #---new
+    
+    # Get the name of the created pod
+    pod_name = api_response.metadata.name
+    service_name = pod_name
+    if flag == "reduce":
+        service_name = pod_name+"-reducer"
 
-        return jsonify({"message": f"Pod {pod_name} created in {namespace} default"}), 200
+    # Wait for the pod to be in 'Running' state
+    while True:
+        pod_status = core_v1.read_namespaced_pod(name=pod_name, namespace='default')
+        if pod_status.status.phase == 'Running':
+            break
+        time.sleep(1)
 
-
-
-def assign_job_to_worker(job_id, job_type, map_script, reduce_script, input_file):
-    try:
-        v1 = client.CoreV1Api()
-        namespace = "default"  # Adjust to your namespace
-        pods = v1.list_namespaced_pod(namespace=namespace, label_selector="app=worker")
-        
-        available_workers = [pod.metadata.name for pod in pods.items if pod.status.phase == "Running"]
-        
-        if not available_workers:
-            print("No available workers found")
-            return
-        
-        # Simple round-robin load balancing
-        worker_index = job_id % len(available_workers)
-        assigned_worker = available_workers[worker_index]
-
-        result = ""
-        for worker in available_workers:
-            result += "new available worker: "+worker+"\n"
-
-        debug_file_path = f"/data/pv0001/debug.txt"
-        #with open(input_file_path, 'wb') as f:
-        #    f.write(input_file.encode())
-
-        with open(debug_file_path, 'w') as file:
-            file.write(debug_file_path)
-
-        
-        # Update the job with the assigned worker details in MongoDB
-        job_update = {
-            "worker": assigned_worker,
-            "status": "assigned"
+    # Create a service manifest
+    service_manifest = {
+        'apiVersion': 'v1',
+        'kind': 'Service',
+        'metadata': {
+            'name': f'{service_name}-service'
+        },
+        'spec': {
+            'selector': {
+                'app': 'worker'
+            },
+            'ports': [{
+                'protocol': 'TCP',
+                'port': 5004,
+                'targetPort': 5004
+            }],
+            'type': 'ClusterIP'
         }
-        jobs_collection.update_one({"job_id": job_id}, {"$set": job_update})
+    }
 
-        url = "10.244.1.168:5004/execute"
-        data = {
-            "task_type": "map",  # or "reduce"
-            "input_file_path": "path/to/input_file.txt",
-            "output_file_path": "path/to/output_file.txt",  # optional
-            "key": "some_key"  # only needed for "reduce" task_type
-        }
+    # Create the service
+    service_response = core_v1.create_namespaced_service(namespace=namespace, body=service_manifest)
 
-        requests.post(url, json="data")
+    # Get the service's cluster IP
+    service_ip = service_response.spec.cluster_ip
 
-    except Exception as e:
-        print(f"Failed to assign job {job_id}: {str(e)}")
+    # Construct the filename
+    filename = f"{service_name}.txt"
+    print('sleeping')
+    sleep(15)
+    # Send a POST request to the pod via the service
+    response = requests.post(f"http://{service_name}-service.{namespace}.svc.cluster.local:5004/execute", json={"pod_name": service_name, "input_file_path": filename, "task_type": flag})
+
+    sleep(5)
+
+    if response.status_code == 200 and flag == "map":
+        v1=client.CoreV1Api()
+        v1.delete_namespaced_pod(name=service_name,namespace=namespace)
+        v1.delete_namespaced_service(name=f"{service_name}-service",namespace=namespace)
+        allMappers = allMappers - 1
+        if allMappers == 0:
+            time.sleep(2)
+            # Assign job to a reducers
+            for i in range(int(allReducers)):
+                assign_job_to_worker(job_id, "reduce", i)
+    elif response.status_code == 200 and flag == "reduce":
+        v1=client.CoreV1Api()
+        v1.delete_namespaced_pod(name=service_name,namespace=namespace)
+        v1.delete_namespaced_service(name=f"{service_name}-reducer-service",namespace=namespace)
+
+
+
+    # Get the pod's IP address
+    #pod_ip = pod_status.status.pod_ip
+
+    #----new
+    #filename= f"{pod_name}.txt"
+
+    #response = requests.post(f"{pod_name}:5004/execute", json={"pod_name": pod_name, "input_file_path": filename, "task_type": flag})
+    
+
+    return service_ip
+    #return jsonify({"message": f"Pod {pod_name}, pod ip {pod_ip} created in {namespace} default"}), 200
+
+
+def delete_job(api_instance):
+    # Delete job
+    api_response = api_instance.delete_namespaced_job(
+        name="map",
+        namespace="default",
+        body=clientMongo.V1DeleteOptions(
+            propagation_policy='Foreground',
+            grace_period_seconds=5))
+    print("Job deleted. status='%s'" % str(api_response.status))
+
+@app.route('/terminate', methods=['POST'])
+def terminate_pod():
+    data = request.json()
+    pod_name = data['pod_name']
+
+    #Delete pod with name pod_name
+
+    #if not token_entry:
+    #    return jsonify({"error": "Token Not Found"}), 403
+
+    jobs = list(jobs_collection.find({}, {'_id': False}))
+    return jsonify(jobs), 200    
 
 @app.route('/jobs', methods=['GET'])
 def get_jobs():
-    token = request.headers.get('Authorization')
-    token_entry = tokens_collection.find_one({'token': token})
+    #token = request.headers.get('Authorization')
+    #token_entry = tokens_collection.find_one({'token': token})
     #if not token_entry:
     #    return jsonify({"error": "Token Not Found"}), 403
 
@@ -245,4 +313,14 @@ def get_jobs():
     return jsonify(jobs), 200
 
 if __name__ == "__main__":
+     # Configs can be set in Configuration class directly or using helper
+    # utility. If no argument provided, the config will be loaded from
+    # default location.
+
+    # config.load_kube_config()
+    config.load_incluster_config()
+    #batch_v1 = client.BatchV1Api()
+
+    # Create a job object with client-python API. The job we
+
     app.run(host='0.0.0.0', port=5002)

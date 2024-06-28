@@ -16,9 +16,10 @@ spec:
       - name: ui
         image: georgeval/ui-service:latest
         ports:
-        - containerPort: 5002
+        - containerPort: 5003
         env:
         - name: AUTH_URL
           value: "http://auth-service:5000"
         - name: MANAGER_URL
-          value: "http://manager-service:5001"
+          value: "http://manager-service:5002"
+      serviceAccountName: ui-account 
