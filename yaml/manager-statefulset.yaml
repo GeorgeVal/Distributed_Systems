@@ -4,7 +4,7 @@ metadata:
   name: manager
 spec:
   serviceName: "manager"
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: manager
@@ -13,6 +13,7 @@ spec:
       labels:
         app: manager
     spec:
+      serviceAccountName: ui-account
       containers:
       - name: manager
         image: georgeval/manager-service:latest

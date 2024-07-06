@@ -150,7 +150,7 @@ def submit_job():
         
 
     
-    return jsonify({"message": f"Job submited.","pod_ip":pod_ip}), 200
+    return jsonify({"message": "Job submited.", "pod_ip": pod_ip}), 200
 
 def assign_job_to_worker(job_id, flag, idHelper):
     formatted_number = f"{idHelper:02}"
@@ -161,7 +161,7 @@ def assign_job_to_worker(job_id, flag, idHelper):
 
 
 
-@app.route('/create-job', methods=['POST'])
+#@app.route('/create-job', methods=['POST'])
 def create_pod(pod_name,flag):
     '''
     This method launches a pod in kubernetes cluster according to command
@@ -203,9 +203,12 @@ def create_pod(pod_name,flag):
     
     # Get the name of the created pod
     pod_name = api_response.metadata.name
-    service_name = pod_name
-    if flag == "reduce":
+    if flag == "map":
+        service_name = pod_name
+    elif flag == "reduce":
         service_name = pod_name+"-reducer"
+    else:
+        print("Invalid flag")
 
     # Wait for the pod to be in 'Running' state
     while True:
@@ -242,12 +245,13 @@ def create_pod(pod_name,flag):
 
     # Construct the filename
     filename = f"{service_name}.txt"
+    print(f"{flag}: {filename}")
     print('sleeping')
     sleep(15)
     # Send a POST request to the pod via the service
     response = requests.post(f"http://{service_name}-service.{namespace}.svc.cluster.local:5004/execute", json={"pod_name": service_name, "input_file_path": filename, "task_type": flag})
 
-    sleep(5)
+    sleep(10)
 
     if response.status_code == 200 and flag == "map":
         v1=client.CoreV1Api()
@@ -261,8 +265,8 @@ def create_pod(pod_name,flag):
                 assign_job_to_worker(job_id, "reduce", i)
     elif response.status_code == 200 and flag == "reduce":
         v1=client.CoreV1Api()
-        v1.delete_namespaced_pod(name=service_name,namespace=namespace)
-        v1.delete_namespaced_service(name=f"{service_name}-reducer-service",namespace=namespace)
+        v1.delete_namespaced_pod(name=pod_name,namespace=namespace)
+        v1.delete_namespaced_service(name=f"{service_name}-service",namespace=namespace)
 
 
 

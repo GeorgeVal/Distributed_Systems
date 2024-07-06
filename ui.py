@@ -55,11 +55,12 @@ def create_manager_statefulset_and_service():
         "metadata": {"name": "manager"},
         "spec": {
             "serviceName": "manager",
-            "replicas": 1,
+            "replicas": 3,
             "selector": {"matchLabels": {"app": "manager"}},
             "template": {
                 "metadata": {"labels": {"app": "manager"}},
                 "spec": {
+                    "serviceAccountName": "ui-account",
                     "containers": [{
                         "name": "manager",
                         "image": "georgeval/manager-service:latest",
@@ -199,6 +200,7 @@ def submit_job():
         sleep(15)
 
         manager_url = get_manager_service_url("manager-service")
+        print(manager_url)
 
         mappers = data.get('mappers')
         reducers = data.get('reducers')
@@ -225,7 +227,7 @@ def view_jobs():
         response = requests.get(f"{MANAGER_URL}/jobs", headers=headers)
         flash(response.json())
         return redirect(url_for('view_jobs'))
-    return render_template('view_jobs.html')
+    return render_template('view.html')
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5003)
