@@ -6,7 +6,7 @@
 </head>
 <body>
   <h1>Submit Job</h1>
-  <form action="/jobs/submit" method="post">
+  <form action="/jobs/submit" method="post" enctype="multipart/form-data">
     <label for="token">User Token:</label>
     <input type="text" id="token" name="token" required><br>
     <label for="mappers">Number of Mappers:</label>
@@ -17,12 +17,8 @@
     <input type="text" id="map_script" name="map_script" required><br>
     <label for="reduce_script">Reduce Script:</label>
     <input type="text" id="reduce-script" name="reduce_script" required><br>
-    <label for="file_path">File Path:</label>
-    <input type="text" id="file_path" name="file_path" required><br>
-    <select id="job_type" name="job_type">
-      <option value="map">Map</option>
-      <option value="reduce">Reduce</option>
-    </select><br>
+    <label for="file">Input File:</label>
+    <input type="file" id="file" name="file" required><br>
     <input type="submit" value="Submit Job">
   </form>
   <a href="/">Back to Home</a>

@@ -20,6 +20,4 @@ spec:
         env:
         - name: AUTH_URL
           value: "http://auth-service:5000"
-        - name: MANAGER_URL
-          value: "http://manager-service:5002"
       serviceAccountName: ui-account 

@@ -1,6 +1,6 @@
 # manager.py
 
-
+import random
 import ssl
 import sys
 import time
@@ -30,9 +30,28 @@ clientMinio = Minio(
     )
 
 global allMappers
+global allMappersConst
 global allReducers
+global allReducersConst
 allMappers = -5
 allReducers = -5
+allMappersConst = -5
+allReducersConst = -5
+db = clientMongo['Manager_db']
+db_auth =clientMongo['auth_db']
+jobs_collection = db['jobs']
+
+#tokens from our mongodb 'tokens'
+tokens_collection = db_auth['tokens']
+
+
+def createBuckets():
+     buckets = ["map-bucket", "reduce-bucket"]
+     # Make the bucket if it doesn't exist.
+     for bucket_name in buckets:
+        found = clientMinio.bucket_exists(bucket_name)
+        if not found:
+            clientMinio.make_bucket(bucket_name)
 
 def uploadFile(source_file, bucket_name, destination_file):
 
@@ -46,30 +65,16 @@ def uploadFile(source_file, bucket_name, destination_file):
     clientMinio.fput_object(
         bucket_name, destination_file, source_file,
     )
-    print(
-        source_file, "successfully uploaded as object",
-        destination_file, "to bucket", bucket_name,
-    )
-
-db = clientMongo['Manager_db']
-db_auth =clientMongo['auth_db']
-jobs_collection = db['jobs']
-
-#jobs = {}
 
 
-#tokens from our mongodb 'tokens'
-tokens_collection = db_auth['tokens']
 
-global job_id_counter 
-job_id_counter = 1
-job_id = 1
+
 
 def split_file(jobId, bucket_name, object_name, file_name, n):
     # Read the input file
-    clientMinio.fget_object("input-bucket", "input.txt", "input.txt")
+    clientMinio.fget_object("input-bucket", f"input{jobId}.txt", f"input{jobId}.txt")
 
-    with open("input.txt", 'r') as f:
+    with open(f"input{jobId}.txt", 'r') as f:
         lines = f.readlines()
 
     # Total number of lines
@@ -98,8 +103,10 @@ def split_file(jobId, bucket_name, object_name, file_name, n):
 
 @app.route('/submit_job', methods=['POST'])
 def submit_job():
+    global allMappersConst
     global allMappers 
     global allReducers
+    global allReducersConst
     token = request.headers.get('Authorization')
     #if token not in tokens_collection:
     #    return jsonify({"error": "Unauthorized"}), 403
@@ -109,14 +116,17 @@ def submit_job():
     reduce_script = data['reduce_script']
     mappers = data["mappers"]
     reducers = data["reducers"]
-    global job_id_counter
+    job_id = data["job_id"]
     #job_id = job_id_counter
-    job_id = 1
-    job_id_counter += 1
     input_file_path = f"/data/pv0001/job_{job_id}_input.txt"
 
+    with open(f'stating.txt', 'w') as f:
+            f.write(f"{job_id}\n")
+
     allMappers = int(mappers)
+    allMappersConst = int(mappers)
     allReducers = int(reducers)
+    allReducersConst = int(reducers)
 
     # os.makedirs(os.path.dirname(input_file_path), exist_ok=True)
 
@@ -128,7 +138,7 @@ def submit_job():
     #    f.write(input_file.encode())
 
 
-    split_file(job_id, "input-bucket", "input.txt", "input.txt", int(mappers))
+    split_file(job_id, "input-bucket", "input{job_id}.txt", "input{job_id}.txt", int(mappers))
 
     #uploadFile(input_file_path)
 
@@ -147,22 +157,35 @@ def submit_job():
     # Assign job to a mapper
     for i in range(int(mappers)):
         pod_ip[i]=assign_job_to_worker(job_id, "map", i)
+        with open(f'debug-{i}.txt', 'w') as f:
+            f.write(f"{pod_ip[i]}\n")
         
 
     
-    return jsonify({"message": "Job submited.", "pod_ip": pod_ip}), 200
+    return jsonify({"message": "Job submited."}), 200
 
 def assign_job_to_worker(job_id, flag, idHelper):
     formatted_number = f"{idHelper:02}"
     fullString = "worker-pod"+str(job_id)+formatted_number
-    pod_ip=create_pod(fullString, flag)
+    if(flag == "reduce"):
+        fullString = 'r'+fullString
+    pod_ip=create_pod(fullString, flag, job_id)
     return pod_ip
     #return jsonify({"message": "Full string is ", "fullString": job_id}), 200
 
 
+def delete_all_files(bucket_name):
+    try:
+        objects = clientMinio.list_objects(bucket_name, recursive=True)
+        for obj in objects:
+            clientMinio.remove_object(bucket_name, obj.object_name)
+        print(f"All files in bucket '{bucket_name}' have been deleted.")
+    except Exception as e:
+        print(f"Error deleting files in bucket '{bucket_name}': {e}")
+
 
 #@app.route('/create-job', methods=['POST'])
-def create_pod(pod_name,flag):
+def create_pod(pod_name,flag, jobId):
     '''
     This method launches a pod in kubernetes cluster according to command
     '''
@@ -171,8 +194,10 @@ def create_pod(pod_name,flag):
     global allReducers
     core_v1 = core_v1_api.CoreV1Api()
     namespace = "default"
-    
+    mappers = allMappers
 
+    with open(f'jobId.txt', 'w') as f:
+            f.write(f"{jobId}\n")
     # Create pod manifest
     pod_manifest = {
         'apiVersion': 'v1',
@@ -186,7 +211,7 @@ def create_pod(pod_name,flag):
         'spec': {
             'containers': [{
                 'name': 'worker',
-                'image': 'georgeval/worker-service:latest',
+                'image': 'kfarmakis/worker-service:latest',
                 'ports': [{
                     'containerPort': 5004
                 }]
@@ -215,7 +240,6 @@ def create_pod(pod_name,flag):
         pod_status = core_v1.read_namespaced_pod(name=pod_name, namespace='default')
         if pod_status.status.phase == 'Running':
             break
-        time.sleep(1)
 
     # Create a service manifest
     service_manifest = {
@@ -246,27 +270,103 @@ def create_pod(pod_name,flag):
     # Construct the filename
     filename = f"{service_name}.txt"
     print(f"{flag}: {filename}")
-    print('sleeping')
-    sleep(15)
+    sleep(2)    
     # Send a POST request to the pod via the service
-    response = requests.post(f"http://{service_name}-service.{namespace}.svc.cluster.local:5004/execute", json={"pod_name": service_name, "input_file_path": filename, "task_type": flag})
+    random_number = random.randint(1, 10000)
+    with open(f'{random_number}debug-request{pod_name}.txt', 'w') as f:
+                    f.write(f"stelnei {flag} request sthn ip = {service_ip}\n mappers:{int(mappers)}")
+    response = requests.post(f"http://{service_name}-service.{namespace}.svc.cluster.local:5004/execute", json={"pod_name": service_name, "job_id": jobId, "input_file_path": filename, "task_type": flag, "reducers": int(allReducersConst), "mappers": int(allMappersConst)})
 
-    sleep(10)
+    sleep(2)
 
-    if response.status_code == 200 and flag == "map":
+    # Parse the JSON response
+    response_data = response.json()
+    
+    # Access the 'flag' value
+    flag_value = response_data.get('flag')
+    if response.status_code == 200 and  flag_value == "map":
         v1=client.CoreV1Api()
         v1.delete_namespaced_pod(name=service_name,namespace=namespace)
         v1.delete_namespaced_service(name=f"{service_name}-service",namespace=namespace)
         allMappers = allMappers - 1
         if allMappers == 0:
-            time.sleep(2)
             # Assign job to a reducers
             for i in range(int(allReducers)):
-                assign_job_to_worker(job_id, "reduce", i)
-    elif response.status_code == 200 and flag == "reduce":
+                with open(f'debug-reduce-{i}.txt', 'w') as f:
+                    f.write(f"mpainei reduce gia i = {i}\n")
+                assign_job_to_worker(jobId, "reduce", i)
+    elif response.status_code == 200 and flag_value == "reduce":
+        with open("finalReduceStart.txt", 'w') as f:
+                f.write(f"{pod_name}")
         v1=client.CoreV1Api()
         v1.delete_namespaced_pod(name=pod_name,namespace=namespace)
         v1.delete_namespaced_service(name=f"{service_name}-service",namespace=namespace)
+        allReducers = allReducers - 1
+        if allReducers == 0:
+            delete_all_files("map-bucket")
+            # Create pod manifest
+            namespace = "default"
+            pod_manifest = {
+                'apiVersion': 'v1',
+                'kind': 'Pod',
+                'metadata': {
+                    'name': f"final-reduce{jobId}-worker",
+                    'labels': {
+                        'app': 'worker'
+                    }
+                },
+                'spec': {
+                    'containers': [{
+                        'name': 'worker',
+                        'image': 'kfarmakis/worker-service:latest',
+                        'ports': [{
+                            'containerPort': 5004
+                        }]
+                    }]
+                }
+            }
+
+            # Create the pod
+            api_response = core_v1.create_namespaced_pod(body=pod_manifest,
+                namespace='default')
+
+            # Create a service manifest
+            service_manifest = {
+                'apiVersion': 'v1',
+                'kind': 'Service',
+                'metadata': {
+                    'name': f'final-reduce{jobId}-service'
+                },
+                'spec': {
+                    'selector': {
+                        'app': 'worker'
+                    },
+                    'ports': [{
+                        'protocol': 'TCP',
+                        'port': 5004,
+                        'targetPort': 5004
+                    }],
+                    'type': 'ClusterIP'
+                }
+            }
+
+            # Create the service
+            service_response = core_v1.create_namespaced_service(namespace=namespace, body=service_manifest)
+            sleep(10)
+            # Get the service's cluster IP
+            service_ip = service_response.spec.cluster_ip
+            with open("sendFinal.txt", 'w') as f:
+                f.write("mpainei")
+            response = requests.post(f"http://final-reduce{jobId}-service.{namespace}.svc.cluster.local:5004/finalReduce", json={"job_id": jobId, "reducers": allReducersConst})
+            sleep(4)
+            if response.status_code == 200:
+                v1.delete_namespaced_pod(name=f"final-reduce{jobId}-worker",namespace=namespace)
+                v1.delete_namespaced_service(name=f"final-reduce{jobId}-service",namespace=namespace)
+            
+            return response
+
+    else:
+        return jsonify({"error": f"Worker failed for flag: {flag}"}), 403
 
 
 
@@ -323,7 +423,8 @@ if __name__ == "__main__":
 
     # config.load_kube_config()
     config.load_incluster_config()
-    #batch_v1 = client.BatchV1Api()
+    createBuckets()
+
 
     # Create a job object with client-python API. The job we
 
