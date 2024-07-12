@@ -49,9 +49,10 @@ done;
 kubectl create -f ./yaml/statefulset.yaml
 kubectl apply -f ./yaml/service-account.yaml -f ./yaml/service-role.yaml -f ./yaml/service-binding.yaml
 kubectl apply -f ./yaml/mongo-pvc.yaml -f ./yaml/mongo-deployment.yaml -f ./yaml/mongo-service.yaml
+sleep 12
 kubectl apply -f ./yaml/auth-deployment.yaml -f ./yaml/auth-service.yaml
 kubectl apply -f ./yaml/ui-deployment.yaml -f ./yaml/ui-service.yaml
 
-sleep 10
+
 echo "!!! Wait until all pods are running before using the ui !!!"
-kubectl port-forward service/ui-service 5003:5003
+echo "Then use port-forward service/ui-service 5003:5003"
